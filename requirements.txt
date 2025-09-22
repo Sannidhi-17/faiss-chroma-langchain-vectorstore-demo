@@ -1,0 +1,6 @@
+langchain
+langchain-community
+ollama
+chromadb
+faiss-cpu
+bs4

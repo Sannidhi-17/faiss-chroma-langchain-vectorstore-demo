@@ -1,0 +1,218 @@
+Quick definition
+
+RAG (Retrieval-Augmented Generation) is a pattern that combines a retriever (which finds relevant documents from a corpus) with a generative model (an LLM) that composes an answer using those retrieved documents as grounding. In short: instead of asking the LLM to answer from its internal memory alone, you give it relevant external context first — this improves accuracy, recall of domain facts, and reduces hallucinations.
+
+Why use RAG? (benefits)
+
+Access to up-to-date or private data (docs, product manuals, company knowledge) without fine-tuning the model.
+
+Better factuality — the model’s output is grounded in retrieved documents.
+
+Smaller models can perform like bigger ones for domain tasks because they get external context.
+
+Easier data governance — you control the corpus and can attach metadata/citations.
+
+Core components (what you need)
+
+Document store / corpus — your knowledge base (PDFs, web pages, DB records).
+
+Chunking/Text splitter — break long docs into retrievable pieces (chunks).
+
+Embeddings model — converts text chunks and queries into vectors.
+
+Vector index / store — FAISS, Milvus, Pinecone, Weaviate, etc. (stores vectors & metadata).
+
+Retriever — nearest-neighbour search (dense vectors) or sparse search (BM25), or hybrid.
+
+Reranker (optional) — cross-encoder that reorders retrieved candidates for higher relevance.
+
+Generator (LLM) — the LLM that conditions on retrieved context and the user query to produce the final answer.
+
+Prompt template / grounding strategy — how you feed retrieved docs to the LLM safely and effectively.
+
+Business logic — thresholds, caching, pagination, audit logs, citations.
+
+End-to-end pipeline (step-by-step)
+
+Prepare documents
+
+Collect docs and split text into appropriate chunk sizes (e.g., 200–800 tokens — depends on model/context window).
+
+Keep metadata: source id, filename, page, URL, date.
+
+Embed & index
+
+Create embeddings for each chunk and index them into your vector store.
+
+Query time
+
+Receive user query → create embedding for query.
+
+Retrieve top_k chunks (k commonly 3–10) by nearest neighbour search.
+
+Optional rerank
+
+Use a cross-encoder reranker to reorder retrieved chunks for higher precision.
+
+Construct prompt
+
+Build a prompt that contains:
+
+Short instruction to the LLM (task + constraints).
+
+The retrieved documents (or their summaries/excerpts).
+
+The user’s question.
+
+Example instruction: “Answer using the documents below. If the answer isn’t in the documents, say ‘I don’t know’. Quote the source id for each claim.”
+
+Generate
+
+Send prompt to the LLM and return the generated response (optionally include citations).
+
+Post-processing
+
+Apply business rules: redact PII, attach citations, confidence scoring, save logs, etc.
+
+Simple conceptual prompt pattern
+You are an assistant that answers using the documents below.
+If the documents do not contain the answer, say "I don't know."
+
+Documents:
+[1] Doc title — excerpt or chunk text...
+[2] Doc title — excerpt ...
+
+Question: {user_query}
+
+Answer concisely and cite the documents using [1], [2], ...
+
+Implementation sketch (Python-style pseudocode)
+# 1. Indexing (one time)
+chunks = text_splitter.split_documents(documents)
+vectors = embed_model.embed_documents([c.text for c in chunks])
+vector_store.add(vectors, metadata=[c.meta for c in chunks])
+
+# 2. Query time
+q_vec = embed_model.embed_query(user_query)
+candidates = vector_store.similarity_search_vector(q_vec, top_k=5)
+# optional: rerank with cross_encoder
+prompt = build_prompt(candidates, user_query)
+answer = llm.generate(prompt)
+return answer_with_citations(answer, candidates)
+
+
+(Replace with your stack: OpenAI/Hugging Face embeddings, FAISS/Pinecone/Weaviate, LangChain/Haystack wrappers if desired.)
+
+Common architectural variants
+
+RAG-Sequence vs RAG-Token (original Facebook RAG): differ in how retrieved documents are integrated during generation (sequence-level fusion vs token-level).
+
+Late fusion / Fusion-in-Decoder (FiD): pass multiple documents to the decoder which attends to all of them — strong for long contexts.
+
+Hybrid retriever: combine BM25 (sparse) + dense vectors for recall and precision.
+
+Reranker added: use a lightweight retriever then rerank with a heavier cross-encoder.
+
+Best practices & practical tips
+
+Chunk size matters — too small loses context; too big wastes vector space and may exceed prompt limits. Aim for 200–800 tokens typically.
+
+Top_k tuning — start with 3–5; increase if answers miss context. Use score thresholds to avoid low-relevance docs.
+
+Include metadata — store source id, URL, date so you can cite.
+
+Prompt with explicit instruction to cite — ask the model to quote source ids.
+
+"Don't guess" guardrail — instruct LLM to reply "I don't know" when evidence is insufficient.
+
+Reranking helps — cross-encoders greatly improve precision for QA tasks.
+
+Cache popular queries — reduces cost & latency.
+
+Monitor retrieval quality — measure precision@k and check for hallucinations.
+
+Privacy & safety — filter PII before indexing, and control what content is allowed in responses.
+
+Common pitfalls & how to avoid them
+
+Hallucinations despite retrieval — usually due to poor prompt or irrelevant docs. Use strict grounding instructions and reranker.
+
+Out-of-date index — implement incremental reindexing for frequently changing data.
+
+Over-reliance on retrieved chunk text — if the chunks contain ambiguous statements, the generator may produce wrong conclusions. Prefer clear, authoritative source texts or preprocess summaries.
+
+High cost/latency — retrieving many docs and calling an expensive LLM can be slow/expensive. Use smaller LLMs for draft answers and escalate only when needed.
+
+When to use RAG
+
+You have a private or changing knowledge base (company docs, product catalogs, legal docs).
+
+The model’s training cutoff lacks needed facts.
+
+You want transparent answers with source citations.
+
+You want to avoid expensive fine-tuning for every domain change.
+
+When not to use RAG: tiny simple FAQ where static retrieval is enough, or when you need verified answers from authoritative live systems (e.g., bank balances) — there you should call the authoritative API directly and not rely on document retrieval.
+
+Evaluation & monitoring
+
+Automatic metrics: precision@k for retrieval, BLEU/ROUGE for generation (when ground truth exists), retrieval recall.
+
+Human eval: factual correctness, helpfulness, faithfulness.
+
+Production monitoring: track queries that return low-scoring docs, user corrections, and "I don't know" occurrences. Log sources used for each answer.
+
+Example real-world use cases
+
+Customer support: answer from product manuals.
+
+Internal knowledge base assistant for employees.
+
+Legal / compliance search plus summarization.
+
+Personalized tutoring built over course materials.
+
+Quick checklist before you build
+
+Decide the corpus and how often it updates.
+
+Pick an embedding model (quality vs cost tradeoff).
+
+Pick a vector store (FAISS for local, Pinecone/Weaviate for managed).
+
+Choose the LLM (response quality vs cost), and design the prompt template.
+
+Implement logging/citations so answers are auditable.
+
+If you want, I can now:
+
+Give a concrete code example for your stack (OpenAI embeddings + FAISS + OpenAI chat) — runnable.
+
+Draft a prompt template tuned for your domain.
+
+Sketch a small architecture diagram and recommended parameter defaults (chunk size, top_k, reranker).
+
+Which one would be most helpful next?
+
+You said:
+- Review the Look up APIs released today by George
+- Go throgh the example video of bamboo settings
+- Go through the video sent by the Tina
+
+base on all the materials and videos I design the look ups wireframe and provided all the details. 
+
+rephrase task descritpion
+ChatGPT said:
+
+Here’s a polished version of the task description you can share:
+
+Task Description:
+
+Review the Lookup APIs released today by George.
+
+Watch the Bamboo settings example video.
+
+Watch the video shared by Tina.
+
+Based on these materials and videos, design the Lookups wireframe and provide all necessary details.
